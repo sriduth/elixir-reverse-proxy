@@ -8,40 +8,50 @@ defmodule ReverseProxy.Runner do
   @typedoc "Representation of an upstream service."
   @type upstream :: [String.t] | {Atom.t, Keyword.t}
 
-  @spec retreive(Conn.t, upstream) :: Conn.t
-  def retreive(conn, upstream)
-  def retreive(conn, {plug, opts}) when plug |> is_atom do
-    options = plug.init(opts)
-    plug.call(conn, options)
-  end
+  # @spec retreive(Conn.t, upstream) :: Conn.t
+  # def retreive(conn, upstream)
+  # def retreive(conn, {plug, opts}) when plug |> is_atom do
+  #   options = plug.init(opts)
+  #   plug.call(conn, options)
+  # end
 
-  @spec retreive(Conn.t, upstream, Atom.t) :: Conn.t
-  def retreive(conn, servers, client \\ HTTPoison) do
+  def retreive(conn, servers, opts, client \\ HTTPoison) do
     server = upstream_select(servers)
-    {method, url, body, headers} = prepare_request(server, conn)
-
+    {method, url, body, headers} = prepare_request(server, conn, opts)
+    
     method
       |> client.request(url, body, headers, timeout: 5_000)
       |> process_response(conn)
   end
 
-  @spec prepare_request(String.t, Conn.t) :: {Atom.t,
-                                                  String.t,
-                                                  String.t,
-                                                  [{String.t, String.t}]}
-  defp prepare_request(server, conn) do
+  defp prepare_request(server, conn, opts) do
     conn = conn
-            |> Conn.put_req_header(
-              "x-forwarded-for",
-              conn.remote_ip |> :inet.ntoa |> to_string
-            )
-            |> Conn.delete_req_header("host")
-            |> Conn.delete_req_header(
-              "transfer-encoding"
-            )
+    |> Conn.put_req_header("x-forwarded-for", conn.remote_ip |> :inet.ntoa |> to_string)
+    |> Conn.delete_req_header("host")
+    |> Conn.delete_req_header("transfer-encoding")
+    
     method = conn.method |> String.downcase |> String.to_atom
-    url = "#{prepare_server(conn.scheme, server)}#{conn.request_path}?#{conn.query_string}"
+    proxy_scheme = if Keyword.get opts, :scheme do
+      Keyword.get opts, :scheme
+    else
+      conn.scheme
+    end
+     
+    url = if Keyword.get(opts, :strip_base) do
+      prefix = Keyword.get opts, :base_path
+      if String.starts_with?(conn.request_path, prefix) do
+        prefix_stripped_path = String.replace_prefix(conn.request_path, prefix, "/")
+        "#{prepare_server(proxy_scheme, server)}#{prefix_stripped_path}?#{conn.query_string}"
+      else
+        "#{prepare_server(proxy_scheme, server)}#{conn.request_path}?#{conn.query_string}"
+      end
+    else
+      "#{prepare_server(proxy_scheme, server)}#{conn.request_path}?#{conn.query_string}"
+    end
+    
+    
     headers = conn.req_headers
+
     body = case Conn.read_body(conn) do
       {:ok, body, _conn} ->
         body

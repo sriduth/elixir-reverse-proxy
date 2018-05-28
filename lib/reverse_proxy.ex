@@ -23,16 +23,16 @@ defmodule ReverseProxy do
   def init(opts), do: opts
 
   @spec call(Plug.Conn.t, Keyword.t) :: Plug.Conn.t
-  def call(conn, opts) do
+  def call(conn, opts) do 
     upstream = Keyword.get(opts, :upstream, [])
     callback = fn conn ->
       runner = Application.get_env(:reverse_proxy, :runner, ReverseProxy.Runner)
-      runner.retreive(conn, upstream)
+      runner.retreive(conn, upstream, opts)
     end
 
     if Application.get_env(:reverse_proxy, :cache, false) do
       cacher = Application.get_env(:reverse_proxy, :cacher, ReverseProxy.Cache)
-      cacher.serve(conn, callback)
+      cacher.serve(conn, callback, opts)
     else
       callback.(conn)
     end
